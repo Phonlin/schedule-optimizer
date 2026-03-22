@@ -290,6 +290,7 @@ def index():
         dates=None,
         penalty=None,
         job_id=None,
+        algorithm_name=None,
         algorithms=_algorithms_list(),
         date_cols=DATE_COLS,
     )
@@ -350,6 +351,7 @@ def run_job():
                 "penalty": penalty,
                 "demand_df": demand_df,   # 供違規分析使用
                 "staff_df": staff_df.copy(),  # Gurobi 參考求解需預排與群組
+                "algo_key": algo_key,
             }
             while len(_job_results) > _MAX_JOBS:
                 del _job_results[next(iter(_job_results))]
@@ -405,7 +407,6 @@ def verify_gurobi(job_id):
             from gurobi_reference import (
                 GurobiReferenceError,
                 breakdown_for_json,
-                diff_grid_vs_schedule,
                 solve_reference_mip,
             )
         except ImportError as exc:
@@ -420,7 +421,6 @@ def verify_gurobi(job_id):
         try:
             staff_df = result["staff_df"]
             demand_df = result["demand_df"]
-            grid_df = result["grid_df"]
             penalty = result["penalty"]
 
             def on_log(text: str) -> None:
@@ -428,13 +428,6 @@ def verify_gurobi(job_id):
 
             on_log("啟動 Gurobi 參考求解…")
             sol = solve_reference_mip(staff_df, demand_df, log=on_log)
-
-            diffs = diff_grid_vs_schedule(
-                grid_df,
-                sol["schedule"],
-                sol["engineers"],
-                sol["date_cols"],
-            )
 
             algo_total = float(penalty.get("total", 0))
             gobj = float(sol["gurobi_obj"])
@@ -466,9 +459,6 @@ def verify_gurobi(job_id):
                         "single_off": penalty.get("single_off", 0),
                         "demand": penalty.get("demand", 0),
                     },
-                    "diff_total": len(diffs),
-                    "diff_cells": diffs[:200],
-                    "diff_truncated": len(diffs) > 200,
                 }
             )
         except GurobiReferenceError as exc:
@@ -516,6 +506,10 @@ def show_result(job_id):
         for _, row in demand_df.iterrows()
     }
 
+    algo_key_res = result.get("algo_key", "genetic")
+    sched_meta = REGISTRY.get(algo_key_res)
+    algorithm_name = sched_meta.name if sched_meta else algo_key_res
+
     return render_template(
         "index.html",
         error=None,
@@ -523,6 +517,7 @@ def show_result(job_id):
         dates=dates,
         penalty=penalty,
         job_id=job_id,
+        algorithm_name=algorithm_name,
         algorithms=_algorithms_list(),
         date_cols=DATE_COLS,
         cell_classes=cell_classes,
