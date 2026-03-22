@@ -349,6 +349,7 @@ def run_job():
                 "grid_df": grid_df,
                 "penalty": penalty,
                 "demand_df": demand_df,   # 供違規分析使用
+                "staff_df": staff_df.copy(),  # Gurobi 參考求解需預排與群組
             }
             while len(_job_results) > _MAX_JOBS:
                 del _job_results[next(iter(_job_results))]
@@ -365,6 +366,126 @@ def run_job():
                 msg = progress_q.get(timeout=600)   # 10 分鐘逾時
             except queue.Empty:
                 yield 'data: {"type":"error","message":"計算逾時，請重試。"}\n\n'
+                break
+            yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+            if msg["type"] in ("done", "error"):
+                break
+
+    return Response(
+        event_stream(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _sse_verify_error(msg: str):
+    def gen():
+        yield f'data: {json.dumps({"type": "error", "message": msg}, ensure_ascii=False)}\n\n'
+
+    return Response(
+        gen(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/verify_gurobi/<job_id>", methods=["POST"])
+def verify_gurobi(job_id):
+    """以 Gurobi MIP 求參考最佳，與當次演算法懲罰對照（SSE）。"""
+    result = _job_results.get(job_id)
+    if not result:
+        return _sse_verify_error("結果已過期或不存在，請重新排班。")
+    if "staff_df" not in result:
+        return _sse_verify_error("此結果無法驗證（缺少原始工程師資料），請重新排班。")
+
+    progress_q: queue.Queue = queue.Queue()
+
+    def verify_worker():
+        try:
+            from gurobi_reference import (
+                GurobiReferenceError,
+                breakdown_for_json,
+                diff_grid_vs_schedule,
+                solve_reference_mip,
+            )
+        except ImportError as exc:
+            progress_q.put(
+                {
+                    "type": "error",
+                    "message": f"無法載入 Gurobi 模組：{exc}",
+                }
+            )
+            return
+
+        try:
+            staff_df = result["staff_df"]
+            demand_df = result["demand_df"]
+            grid_df = result["grid_df"]
+            penalty = result["penalty"]
+
+            def on_log(text: str) -> None:
+                progress_q.put({"type": "progress", "message": text, "phase": "gurobi"})
+
+            on_log("啟動 Gurobi 參考求解…")
+            sol = solve_reference_mip(staff_df, demand_df, log=on_log)
+
+            diffs = diff_grid_vs_schedule(
+                grid_df,
+                sol["schedule"],
+                sol["engineers"],
+                sol["date_cols"],
+            )
+
+            algo_total = float(penalty.get("total", 0))
+            gobj = float(sol["gurobi_obj"])
+            delta = round(algo_total - gobj, 4)
+            if gobj > 1e-9:
+                delta_pct = round((algo_total - gobj) / gobj * 100, 2)
+            else:
+                delta_pct = None
+
+            progress_q.put(
+                {
+                    "type": "done",
+                    "phase": "gurobi",
+                    "gurobi_obj": gobj,
+                    "gurobi_status": sol["gurobi_status"],
+                    "mip_gap": sol["mip_gap"],
+                    "algo_total": algo_total,
+                    "delta": delta,
+                    "delta_pct": delta_pct,
+                    "breakdown_gurobi": breakdown_for_json(sol["breakdown"]),
+                    "algo_penalty": {
+                        "total": penalty.get("total", 0),
+                        "consecutive_6": penalty.get("consecutive_6", 0),
+                        "transition": penalty.get("transition", 0),
+                        "default_shift": penalty.get("default_shift", 0),
+                        "rest_blocks": penalty.get("rest_blocks", 0),
+                        "monthly_off": penalty.get("monthly_off", 0),
+                        "weekend_off": penalty.get("weekend_off", 0),
+                        "single_off": penalty.get("single_off", 0),
+                        "demand": penalty.get("demand", 0),
+                    },
+                    "diff_total": len(diffs),
+                    "diff_cells": diffs[:200],
+                    "diff_truncated": len(diffs) > 200,
+                }
+            )
+        except GurobiReferenceError as exc:
+            progress_q.put({"type": "error", "message": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            progress_q.put({"type": "error", "message": str(exc)})
+
+    threading.Thread(target=verify_worker, daemon=True).start()
+
+    def event_stream():
+        while True:
+            try:
+                msg = progress_q.get(timeout=600)
+            except queue.Empty:
+                yield (
+                    'data: {"type":"error","message":"Gurobi 驗證逾時，請重試。"}\n\n'
+                )
                 break
             yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             if msg["type"] in ("done", "error"):

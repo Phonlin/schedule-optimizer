@@ -30,7 +30,7 @@ class GAConfig:
     local_search_every: int = 8 # 每8代做一次 局部搜尋
     local_search_steps: int = 10 # 每次局部搜尋最多調整 10 次
     stagnation_limit: int = 30 # 如果 30代都沒進步，就會觸發restart 或 immigration 增強
-    restarts: int = 15 # 最多允許 15次重啟族群 ，強力跳出 local optimum 手段
+    restarts: int = 5 # 最多允許 15次重啟族群 ，強力跳出 local optimum 手段
     seed: int = 42
     hard_scale: float = 1000.0 # Hard constraint 懲罰倍率
 
