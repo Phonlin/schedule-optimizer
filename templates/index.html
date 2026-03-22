@@ -144,19 +144,12 @@
   {% if penalty %}
   <div class="card shadow-sm mb-4 penalty-card">
     <div class="card-body">
-      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-        <h2 class="h5 card-title mb-0">懲罰分析</h2>
-        {% if job_id %}
-        <button type="button" id="btn-gurobi-verify" class="btn btn-outline-primary btn-sm">
-          以 Gurobi 驗證
-        </button>
-        {% endif %}
-      </div>
       <div class="row g-3 align-items-start">
         <div class="col-12 col-lg-6">
+          <h2 class="h6 fw-semibold mb-2">{{ algorithm_name or '排班演算法' }}</h2>
           <div class="d-flex align-items-center gap-4 flex-wrap">
             <div>
-              <div class="text-muted small mb-1">總懲罰分數（越低越好）</div>
+              <div class="text-muted small mb-1">總懲罰分數</div>
               <div class="penalty-total">{{ penalty.total }}</div>
             </div>
             <div class="vr d-none d-md-block"></div>
@@ -216,6 +209,14 @@
           </div>
         </div>
         <div class="col-12 col-lg-6 gurobi-ref-col pt-3 pt-lg-0">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+            <h2 class="h6 mb-0 fw-semibold">Gurobi 驗證</h2>
+            {% if job_id %}
+            <button type="button" id="btn-gurobi-verify" class="btn btn-outline-primary btn-sm">
+              以 Gurobi 驗證
+            </button>
+            {% endif %}
+          </div>
           <div id="gurobi-verify-result" class="small">
             {% if job_id %}
             <p class="text-muted small mb-0">點擊「以 Gurobi 驗證」以取得 MIP 參考分項與總分對照（需本機 Gurobi／gurobipy）。</p>
