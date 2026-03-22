@@ -131,7 +131,7 @@
         <h2 id="progress-card-title" class="h5 card-title mb-0">算法進度</h2>
         <span id="progress-label" class="text-muted small">準備中…</span>
       </div>
-      <div class="progress mb-3" style="height: 20px;">
+      <div id="progress-bar-wrap" class="progress mb-3" style="height: 20px;">
         <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
              role="progressbar" style="width: 0%">0%</div>
       </div>
@@ -145,7 +145,7 @@
   <div class="card shadow-sm mb-4 penalty-card">
     <div class="card-body">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-        <h2 class="h5 card-title mb-0">懲罰分析與 Gurobi 參考</h2>
+        <h2 class="h5 card-title mb-0">懲罰分析</h2>
         {% if job_id %}
         <button type="button" id="btn-gurobi-verify" class="btn btn-outline-primary btn-sm">
           以 Gurobi 驗證
@@ -218,7 +218,7 @@
         <div class="col-12 col-lg-6 gurobi-ref-col pt-3 pt-lg-0">
           <div id="gurobi-verify-result" class="small">
             {% if job_id %}
-            <p class="text-muted mb-0">點擊「以 Gurobi 驗證」可求得與 workshop 腳本相同的 MIP 參考值，並與左側演算法總分比較差距（需本機已安裝 Gurobi 與 gurobipy）。</p>
+            <p class="text-muted small mb-0">點擊「以 Gurobi 驗證」以取得 MIP 參考分項與總分對照（需本機 Gurobi／gurobipy）。</p>
             {% endif %}
           </div>
         </div>
@@ -311,8 +311,11 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script type="application/json" id="schedule-page-data">{{ {'job_id': job_id, 'algorithm_name': algorithm_name} | tojson }}</script>
 <script>
-  const JOB_ID = {% if job_id %}"{{ job_id }}"{% else %}null{% endif %};
+  const PAGE_DATA = JSON.parse(document.getElementById('schedule-page-data').textContent);
+  const JOB_ID = PAGE_DATA.job_id;
+  const ALGO_NAME = PAGE_DATA.algorithm_name || '排班演算法';
   const form       = document.getElementById('schedule-form');
   const submitBtn  = document.getElementById('submit-btn');
   const progressSec = document.getElementById('progress-section');
@@ -323,6 +326,14 @@
   const jsError     = document.getElementById('js-error');
   const btnGurobi   = document.getElementById('btn-gurobi-verify');
   const gurobiResultEl = document.getElementById('gurobi-verify-result');
+  const progressBarWrap = document.getElementById('progress-bar-wrap');
+  const RUN_LOG_SS_PREFIX = 'schedule_optimizer_run_log_';
+
+  /** 進行中顯示進度條與右側百分比文字；完成後隱藏，僅保留日誌。 */
+  function setProgressMeterVisible(visible) {
+    if (progressBarWrap) progressBarWrap.classList.toggle('d-none', !visible);
+    if (progressLbl) progressLbl.classList.toggle('d-none', !visible);
+  }
 
   function appendLog(text) {
     const line = document.createElement('div');
@@ -331,6 +342,23 @@
     progressLog.appendChild(line);
     progressLog.scrollTop = progressLog.scrollHeight;
   }
+
+  /** 從首頁跳轉結果頁後，還原剛才一般演算法的日誌 HTML。 */
+  function restoreRunLogFromStorage(jobId) {
+    if (!jobId || !progressSec || !progressLog) return;
+    try {
+      const key = RUN_LOG_SS_PREFIX + jobId;
+      const html = sessionStorage.getItem(key);
+      if (!html) return;
+      sessionStorage.removeItem(key);
+      progressSec.style.display = 'block';
+      setProgressMeterVisible(false);
+      progressTitle.textContent = '算法進度';
+      progressLog.innerHTML = html;
+      progressLog.scrollTop = progressLog.scrollHeight;
+    } catch (err) { /* sessionStorage 不可用時略過 */ }
+  }
+  restoreRunLogFromStorage(JOB_ID);
 
   function setProgress(pct, label) {
     progressBar.style.width = pct + '%';
@@ -347,68 +375,46 @@
       .replace(/"/g, '&quot;');
   }
 
+  function tdEndClass(v, kind) {
+    const n = Number(v);
+    if (kind === 'danger') return n > 0 ? 'text-end text-danger fw-semibold' : 'text-end';
+    if (kind === 'warn') return n > 0 ? 'text-end text-warning fw-semibold' : 'text-end';
+    return 'text-end';
+  }
+
   function renderGurobiResult(msg) {
     if (!gurobiResultEl) return;
-    const bg = msg.breakdown_gurobi;
-    const gw = bg.weighted || {};
+    const gw = (msg.breakdown_gurobi && msg.breakdown_gurobi.weighted) ? msg.breakdown_gurobi.weighted : {};
     const ap = msg.algo_penalty;
     const deltaPct = msg.delta_pct;
     const deltaPctStr = (deltaPct === null || deltaPct === undefined)
-      ? '—（參考值為 0，不計算百分比）'
+      ? '—'
       : (deltaPct + ' %');
-    let statusLine = '';
-    if (msg.gurobi_status === 'OPTIMAL') {
-      statusLine = '<span class="text-success fw-semibold">Gurobi：已證明全域最佳（此 MIP 模型）</span>';
-    } else {
-      statusLine = '<span class="text-muted">Gurobi 狀態：<code>' + escapeHtml(msg.gurobi_status) + '</code> — 數值為時間／MIPGap 限制內的參考最佳，未必是理論全域最佳。</span>';
-    }
-    const mipGapStr = (msg.mip_gap !== null && msg.mip_gap !== undefined)
-      ? Number(msg.mip_gap).toExponential(2)
-      : '—';
-    const diffTotal = msg.diff_total || 0;
-    const diffRows = (msg.diff_cells || []).map(function (r) {
-      return '<tr><td>' + escapeHtml(r['人員']) + '</td><td>' + escapeHtml(r['日期']) + '</td><td>' + escapeHtml(r.algo) + '</td><td>' + escapeHtml(r.gurobi) + '</td></tr>';
-    }).join('');
-    const truncNote = msg.diff_truncated
-      ? '<p class="text-warning small mb-0">僅顯示前 200 筆，共 ' + diffTotal + ' 處不同。</p>'
-      : '';
 
-    const summaryClass = (Math.abs(Number(msg.delta)) < 0.01) ? 'text-success' : 'text-body';
+    const row = function (label, weight, av, gv, algoKind, grbKind) {
+      return '<tr><td>' + label + '</td><td class="text-end">' + weight + '</td><td class="' + tdEndClass(av, algoKind) + '">' + escapeHtml(String(av)) + '</td><td class="' + tdEndClass(gv, grbKind || algoKind) + '">' + escapeHtml(String(gv)) + '</td></tr>';
+    };
+
     gurobiResultEl.innerHTML =
-      '<div class="mb-2">' + statusLine + '</div>' +
-      '<div class="row g-2 mb-3">' +
-      '  <div class="col-6">' +
-      '    <div class="text-muted small">您的演算法總分</div>' +
-      '    <div class="fs-4 fw-bold text-primary">' + escapeHtml(String(ap.total)) + '</div>' +
-      '  </div>' +
-      '  <div class="col-6">' +
-      '    <div class="text-muted small">Gurobi 參考目標值</div>' +
-      '    <div class="fs-4 fw-bold text-danger">' + escapeHtml(String(msg.gurobi_obj)) + '</div>' +
-      '  </div>' +
-      '</div>' +
-      '<p class="' + summaryClass + ' mb-2"><strong>差距：</strong> ' + escapeHtml(String(msg.delta)) +
-      ' 分（相對參考值約 <strong>' + deltaPctStr + '</strong>）</p>' +
-      '<p class="text-muted small mb-3">MIP 相對 gap（若適用）：' + escapeHtml(mipGapStr) + '</p>' +
-      '<h3 class="h6 text-muted mb-2">分項對照（Gurobi 加權分項）</h3>' +
-      '<table class="table table-sm table-bordered mb-3 small">' +
-      '  <thead class="table-light"><tr><th>項目</th><th class="text-end">演算法</th><th class="text-end">Gurobi 參考</th></tr></thead>' +
-      '  <tbody>' +
-      '    <tr><td>連續上班 ≥6（加權分）</td><td class="text-end">' + escapeHtml(String(ap.consecutive_6)) + '</td><td class="text-end">' + escapeHtml(String(gw.consecutive_6)) + '</td></tr>' +
-      '    <tr><td>違法接班（加權分）</td><td class="text-end">' + escapeHtml(String(ap.transition)) + '</td><td class="text-end">' + escapeHtml(String(gw.transition)) + '</td></tr>' +
-      '    <tr><td>違反預設（加權分）</td><td class="text-end">' + escapeHtml(String(ap.default_shift)) + '</td><td class="text-end">' + escapeHtml(String(gw.default_shift)) + '</td></tr>' +
-      '    <tr><td>休假段 &lt;2（加權分）</td><td class="text-end">' + escapeHtml(String(ap.rest_blocks)) + '</td><td class="text-end">' + escapeHtml(String(gw.rest_blocks)) + '</td></tr>' +
-      '    <tr><td>月休 &lt;9（加權分）</td><td class="text-end">' + escapeHtml(String(ap.monthly_off)) + '</td><td class="text-end">' + escapeHtml(String(gw.monthly_off)) + '</td></tr>' +
-      '    <tr><td>周末休 &lt;4（加權分）</td><td class="text-end">' + escapeHtml(String(ap.weekend_off)) + '</td><td class="text-end">' + escapeHtml(String(gw.weekend_off)) + '</td></tr>' +
-      '    <tr><td>單休1日（加權分）</td><td class="text-end">' + escapeHtml(String(ap.single_off)) + '</td><td class="text-end">' + escapeHtml(String(gw.single_off)) + '</td></tr>' +
-      '    <tr class="table-secondary"><td>需求未達標（僅演算法）</td><td class="text-end">' + escapeHtml(String(ap.demand)) + '</td><td class="text-end">—（MIP 硬約束）</td></tr>' +
-      '  </tbody></table>' +
-      '<p class="small text-muted mb-2">Gurobi 模型中「夜→早/午、午→早、早午→夜」分別為 ' +
-      escapeHtml(String(bg.night_to_day_aft)) + ' / ' + escapeHtml(String(bg.aft_to_day)) + ' / ' + escapeHtml(String(bg.day_aft_to_night)) + ' 次。</p>' +
-      '<button class="btn btn-sm btn-outline-secondary mb-2" type="button" data-bs-toggle="collapse" data-bs-target="#gurobi-diff-collapse" aria-expanded="false">與參考解班表差異（選看） · 共 ' + diffTotal + ' 處</button>' +
-      '<div class="collapse" id="gurobi-diff-collapse">' +
-      (diffTotal === 0
-        ? '<p class="small text-success mb-0">班表與 Gurobi 參考解逐格一致。</p>'
-        : '<div class="table-responsive"><table class="table table-sm table-striped small"><thead><tr><th>人員</th><th>日期</th><th>演算法</th><th>Gurobi</th></tr></thead><tbody>' + diffRows + '</tbody></table></div>' + truncNote) +
+      '<div class="flex-grow-1">' +
+      '<table class="table table-sm table-borderless mb-0 small">' +
+      '<thead class="text-muted"><tr><th>懲罰項目</th><th class="text-end">權重</th><th class="text-end">' + escapeHtml(ALGO_NAME) + '</th><th class="text-end">Gurobi 參考</th></tr></thead>' +
+      '<tbody>' +
+      row('連續上班 ≥6 天', '1.0 / 次', ap.consecutive_6, gw.consecutive_6, 'danger', 'danger') +
+      row('班別轉換違規（N→D / N→E / E→D）', '1.0 / 次', ap.transition, gw.transition, 'danger', 'danger') +
+      row('違反預設班別', '0.2 / 人天', ap.default_shift, gw.default_shift, 'warn', 'warn') +
+      row('連續休假段數 &lt;2', '0.1 / 缺段', ap.rest_blocks, gw.rest_blocks, 'warn', 'warn') +
+      row('月休 &lt;9 天', '0.1 / 缺天', ap.monthly_off, gw.monthly_off, 'warn', 'warn') +
+      row('周末休 &lt;4 天', '0.1 / 缺天', ap.weekend_off, gw.weekend_off, 'warn', 'warn') +
+      row('單休1日（孤立單日排休）', '0.1 / 次', ap.single_off, gw.single_off, 'warn', 'warn') +
+      '<tr class="text-muted"><td>需求未達標（內部）</td><td class="text-end">50 / 缺人</td><td class="' + tdEndClass(ap.demand, 'danger') + '">' + escapeHtml(String(ap.demand)) + '</td><td class="text-end">—</td></tr>' +
+      '</tbody></table>' +
+      '<table class="table table-sm table-borderless mb-0 small mt-3 pt-3 border-top">' +
+      '<tbody>' +
+      '<tr><th scope="row" class="text-muted fw-normal">' + escapeHtml(ALGO_NAME) + ' 總分</th><td class="text-end penalty-total text-primary">' + escapeHtml(String(ap.total)) + '</td></tr>' +
+      '<tr><th scope="row" class="text-muted fw-normal">Gurobi 參考目標值</th><td class="text-end penalty-total text-danger">' + escapeHtml(String(msg.gurobi_obj)) + '</td></tr>' +
+      '<tr><th scope="row" class="text-muted fw-normal">差距（演算法 − Gurobi）</th><td class="text-end fw-semibold">' + escapeHtml(String(msg.delta)) + ' <span class="text-muted fw-normal">（約 ' + escapeHtml(deltaPctStr) + '）</span></td></tr>' +
+      '</tbody></table>' +
       '</div>';
   }
 
@@ -419,6 +425,7 @@
     progressLog.innerHTML = '';
     jsError.classList.add('d-none');
     jsError.textContent = '';
+    setProgressMeterVisible(true);
     setProgress(50, 'Gurobi 求解中…');
     btnGurobi.disabled = true;
 
@@ -430,6 +437,7 @@
       jsError.classList.remove('d-none');
       btnGurobi.disabled = false;
       progressTitle.textContent = '算法進度';
+      setProgressMeterVisible(false);
       return;
     }
 
@@ -453,8 +461,8 @@
         if (msg.type === 'progress' && msg.message) {
           appendLog(msg.message);
         } else if (msg.type === 'done') {
-          setProgress(100, 'Gurobi 完成');
           appendLog('✓ 參考求解完成。');
+          setProgressMeterVisible(false);
           renderGurobiResult(msg);
           btnGurobi.disabled = false;
           progressTitle.textContent = '算法進度';
@@ -464,6 +472,7 @@
           appendLog('✗ ' + msg.message);
           btnGurobi.disabled = false;
           progressTitle.textContent = '算法進度';
+          setProgressMeterVisible(false);
         }
       }
     }
@@ -482,6 +491,7 @@
     progressLog.innerHTML = '';
     jsError.classList.add('d-none');
     jsError.textContent = '';
+    setProgressMeterVisible(true);
     setProgress(0, '初始化中…');
     submitBtn.disabled = true;
 
@@ -493,6 +503,7 @@
       jsError.textContent = '連線失敗：' + err.message;
       jsError.classList.remove('d-none');
       submitBtn.disabled = false;
+      setProgressMeterVisible(false);
       return;
     }
 
@@ -531,14 +542,25 @@
           }
 
         } else if (msg.type === 'done') {
-          setProgress(100, '完成！正在跳轉…');
           appendLog('✓ 演化完成，載入結果中…');
-          window.location.href = '/result/' + msg.job_id;
+          setProgressMeterVisible(false);
+          progressLog.scrollTop = progressLog.scrollHeight;
+          try {
+            sessionStorage.setItem(
+              RUN_LOG_SS_PREFIX + msg.job_id,
+              progressLog.innerHTML
+            );
+          } catch (err) { /* 略過 */ }
+          const jid = msg.job_id;
+          setTimeout(function () {
+            window.location.href = '/result/' + jid;
+          }, 800);
 
         } else if (msg.type === 'error') {
           jsError.textContent = '錯誤：' + msg.message;
           jsError.classList.remove('d-none');
           submitBtn.disabled = false;
+          setProgressMeterVisible(false);
           break;
         }
       }

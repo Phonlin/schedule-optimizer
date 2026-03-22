@@ -234,14 +234,21 @@ def solve_reference_mip(
     D = range(num_days)
     S = range(len(SHIFTS))
 
+    n_pre = sum(len(d) for d in pre_assigned.values())
+    L(
+        f"問題規模：{num_eng} 人 × {num_days} 天，"
+        f"預先鎖定班次 {n_pre} 格，周末日索引 {len(weekend_days)} 天。"
+    )
     L("建立 Gurobi 模型…")
     m = gp.Model("TSMC_Scheduling_ref")
     m.setParam("TimeLimit", time_limit)
     m.setParam("MIPGap", mip_gap)
     m.setParam("OutputFlag", 0)
 
+    L("加入決策變數 x[人員,日期,班別]…")
     x = m.addVars(num_eng, num_days, len(SHIFTS), vtype=GRB.BINARY, name="x")
 
+    L("加入約束：每日每人一班、預排、每日 D/E/N 人力需求…")
     for i in I:
         for d in D:
             m.addConstr(
@@ -268,6 +275,7 @@ def solve_reference_mip(
 
     obj_terms = []
 
+    L("加入懲罰：連續上班 ≥6 天（z_consec6）…")
     z_consec6 = m.addVars(num_eng, num_days, vtype=GRB.BINARY, name="z_consec6")
     for i in I:
         for d in range(5, num_days):
@@ -287,6 +295,7 @@ def solve_reference_mip(
                 )
             obj_terms.append(1.0 * z_consec6[i, d])
 
+    L("加入懲罰：不合法班別銜接（z_trans）…")
     z_trans = m.addVars(num_eng, num_days - 1, 3, vtype=GRB.BINARY, name="z_trans")
     for i in I:
         for d in range(num_days - 1):
@@ -313,6 +322,7 @@ def solve_reference_mip(
             for k in range(3):
                 obj_terms.append(1.0 * z_trans[i, d, k])
 
+    L("加入懲罰：違反預設班別（z_viol_def）…")
     z_viol_def = m.addVars(num_eng, num_days, vtype=GRB.BINARY, name="z_viol_def")
     for i in I:
         grp = default_group_list[i]
@@ -324,6 +334,7 @@ def solve_reference_mip(
                 )
             obj_terms.append(0.2 * z_viol_def[i, d])
 
+    L("加入懲罰：月休、周末休、單休、休假段數（z_off_short / z_wk_short / z_iso / z_bstart…）…")
     z_off_short = m.addVars(num_eng, lb=0, vtype=GRB.INTEGER, name="z_off_short")
     for i in I:
         total_off = gp.quicksum(x[i, d, S_IDX["O"]] for d in D)
@@ -376,22 +387,63 @@ def solve_reference_mip(
 
     m.setObjective(gp.quicksum(obj_terms), GRB.MINIMIZE)
 
-    last_log = [0.0]
+    m.update()
+    try:
+        L(
+            f"模型已組立：變數 {m.NumVars}，"
+            f"限制式 {m.NumConstrs}，"
+            f"二元 {m.NumBinVars}，"
+            f"一般整數 {m.NumIntVars}。"
+        )
+    except (gp.GurobiError, AttributeError):
+        L("模型已組立，開始更新求解器…")
+
+    last_mip_wall = [0.0]
+    last_sol_wall = [0.0]
+    last_sol_obj: list[float | None] = [None]
+    _inf = getattr(GRB, "INFINITY", 1e100)
 
     def mip_callback(model: gp.Model, where: int) -> None:
-        if where != GRB.Callback.MIPSOL:
-            return
-        now = time.time()
-        if now - last_log[0] < 3.0:
-            return
-        last_log[0] = now
-        try:
-            obj = model.cbGet(GRB.Callback.MIPSOL_OBJ)
-            L(f"求解中… 目前可行解目標 ≈ {obj:.4f}")
-        except (gp.GurobiError, AttributeError):
-            pass
+        if where == GRB.Callback.MIP:
+            try:
+                now = time.time()
+                if now - last_mip_wall[0] < 2.0:
+                    return
+                last_mip_wall[0] = now
+                rt = float(model.cbGet(GRB.Callback.RUNTIME))
+                nodes = int(model.cbGet(GRB.Callback.MIP_NODCNT))
+                objbst = float(model.cbGet(GRB.Callback.MIP_OBJBST))
+                objbnd = float(model.cbGet(GRB.Callback.MIP_OBJBND))
+                bst_s = f"{objbst:.4f}" if objbst < _inf else "—"
+                bnd_s = f"{objbnd:.4f}" if objbnd > -_inf else "—"
+                extra = ""
+                try:
+                    g = float(model.cbGet(GRB.Callback.MIP_GAP))
+                    if g < _inf and g == g:  # not nan
+                        extra = f"  gap={100.0 * g:.2f}%"
+                except (gp.GurobiError, AttributeError, TypeError, ValueError):
+                    pass
+                L(
+                    f"[分枝定界] t={rt:.1f}s  節點={nodes}  "
+                    f"最佳可行={bst_s}  下界={bnd_s}{extra}"
+                )
+            except (gp.GurobiError, AttributeError, TypeError, ValueError):
+                pass
+        elif where == GRB.Callback.MIPSOL:
+            try:
+                now = time.time()
+                obj = float(model.cbGet(GRB.Callback.MIPSOL_OBJ))
+                prev = last_sol_obj[0]
+                if prev is not None and abs(obj - prev) < 1e-9 and now - last_sol_wall[0] < 0.5:
+                    return
+                last_sol_wall[0] = now
+                last_sol_obj[0] = obj
+                rt = float(model.cbGet(GRB.Callback.RUNTIME))
+                L(f"[新可行解] t={rt:.1f}s  目標值 = {obj:.6f}")
+            except (gp.GurobiError, AttributeError, TypeError, ValueError):
+                pass
 
-    L(f"開始求解（TimeLimit={time_limit}s, MIPGap={mip_gap}）…")
+    L(f"開始分枝定界求解（TimeLimit={time_limit}s，MIPGap={mip_gap}）…")
     m.optimize(mip_callback)
 
     status = m.Status
@@ -425,7 +477,23 @@ def solve_reference_mip(
     )
     raw_penalty = weighted_total_penalty(bd)
 
-    L(f"完成。狀態={status_str}，目標值={obj_val:.4f}")
+    try:
+        rt = float(m.Runtime)
+        nc = int(m.NodeCount)
+        L(
+            f"求解結束：狀態={status_str}，"
+            f"目標值={obj_val:.6f}，"
+            f"耗時={rt:.2f}s，"
+            f"探訪節點={nc}。"
+        )
+    except (gp.GurobiError, AttributeError, TypeError, ValueError):
+        L(f"求解結束：狀態={status_str}，目標值={obj_val:.6f}。")
+    if mip_gap_val is not None:
+        try:
+            L(f"MIP 結束時相對 gap = {float(mip_gap_val) * 100:.4f} %")
+        except (TypeError, ValueError):
+            pass
+    L("正在依解向量計算懲罰分項 breakdown…")
 
     return {
         "gurobi_obj": obj_val,
