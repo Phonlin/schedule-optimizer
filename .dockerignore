@@ -1,0 +1,14 @@
+.venv/
+.conda/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.env.*
+.git/
+.gitignore
+.vscode/
+*.xlsx
+*.csv
+gurobi.lic
+workshop_gurobi_result.py
