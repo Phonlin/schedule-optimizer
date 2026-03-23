@@ -70,7 +70,6 @@
 </head>
 <body>
 <div class="container-fluid py-4 px-4">
-
   <h1 class="h3 mb-1 fw-bold">好吧來排班</h1>
   <p class="text-muted mb-4"></p>
 
@@ -80,7 +79,7 @@
     <strong>錯誤：</strong>{{ error }}
   </div>
   {% endif %}
-
+  
   {# ── 上傳表單 ── #}
   <div class="card shadow-sm mb-4">
     <div class="card-body">
@@ -91,13 +90,13 @@
           <div class="col-md-4">
             <label for="shift_csv" class="form-label fw-semibold">班別需求 CSV</label>
             <input class="form-control" type="file" id="shift_csv" name="shift_csv" accept=".csv" required>
-            <div class="form-text">必要欄位：Date、Day、Afternoon、Night</div>
+            <div class="form-text">例如：Shift_Demand.csv</div>
           </div>
 
           <div class="col-md-4">
             <label for="staff_csv" class="form-label fw-semibold">工程師清單 CSV</label>
             <input class="form-control" type="file" id="staff_csv" name="staff_csv" accept=".csv" required>
-            <div class="form-text">必要欄位：人員、班別群組、Date_1 ~ Date_30</div>
+            <div class="form-text">例如：Engineer_List.csv</div>
           </div>
 
           <div class="col-md-2">
@@ -409,12 +408,15 @@
       row('周末休 &lt;4 天', '0.1 / 缺天', ap.weekend_off, gw.weekend_off, 'warn', 'warn') +
       row('單休1日（孤立單日排休）', '0.1 / 次', ap.single_off, gw.single_off, 'warn', 'warn') +
       '<tr class="text-muted"><td>需求未達標（內部）</td><td class="text-end">50 / 缺人</td><td class="' + tdEndClass(ap.demand, 'danger') + '">' + escapeHtml(String(ap.demand)) + '</td><td class="text-end">—</td></tr>' +
+      '<tr class="border-top">' +
+      '<th scope="row" colspan="3" class="text-end text-primary fw-normal">總懲罰分數</th>' +
+      '<td class="text-end penalty-total text-primary">' + escapeHtml(Number(ap.total).toFixed(1)) + '</td>' +
+      '</tr>' +
       '</tbody></table>' +
       '<table class="table table-sm table-borderless mb-0 small mt-3 pt-3 border-top">' +
       '<tbody>' +
-      '<tr><th scope="row" class="text-muted fw-normal">' + escapeHtml(ALGO_NAME) + ' 總分</th><td class="text-end penalty-total text-primary">' + escapeHtml(String(ap.total)) + '</td></tr>' +
-      '<tr><th scope="row" class="text-muted fw-normal">Gurobi 參考目標值</th><td class="text-end penalty-total text-danger">' + escapeHtml(String(msg.gurobi_obj)) + '</td></tr>' +
-      '<tr><th scope="row" class="text-muted fw-normal">差距（演算法 − Gurobi）</th><td class="text-end fw-semibold">' + escapeHtml(String(msg.delta)) + ' <span class="text-muted fw-normal">（約 ' + escapeHtml(deltaPctStr) + '）</span></td></tr>' +
+      '<tr><th scope="row" class="text-muted fw-normal">Gurobi 參考目標值</th><td class="text-end penalty-total text-danger">' + escapeHtml(Number(msg.gurobi_obj).toFixed(1)) + '</td></tr>' +
+      '<tr><th scope="row" class="text-muted fw-normal">差距（演算法 − Gurobi）</th><td class="text-end fw-semibold">' + escapeHtml(Number(msg.delta).toFixed(1)) + ' <span class="text-muted fw-normal">（約 ' + escapeHtml(deltaPctStr) + '）</span></td></tr>' +
       '</tbody></table>' +
       '</div>';
   }
