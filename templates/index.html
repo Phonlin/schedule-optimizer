@@ -90,6 +90,8 @@
     <div class="card-body">
       <h2 class="h5 card-title mb-3">上傳資料</h2>
       <form id="schedule-form" enctype="multipart/form-data">
+        {# name 放在 hidden，避免父層 d-none 時部分環境未送出欄位 #}
+        <input type="hidden" name="stop_threshold" id="stop_threshold_hidden" value="">
         <div class="row g-3 align-items-start upload-controls-row">
 
           <div class="col-12 col-md-3 col-lg-3">
@@ -115,10 +117,10 @@
           </div>
 
           <div class="col-12 col-md-2 col-lg-2 d-none" id="col-stop-threshold">
-            <label for="stop_threshold" class="form-label fw-semibold">停止閾值</label>
-            <input class="form-control" type="text" id="stop_threshold" name="stop_threshold"
+            <label for="stop_threshold_ui" class="form-label fw-semibold">停止閾值</label>
+            <input class="form-control" type="text" id="stop_threshold_ui"
                    inputmode="decimal" placeholder="選填" autocomplete="off">
-            <div class="form-text">懲罰值 ≤ 此值時提前停止，預設 0.6</div>
+            <div class="form-text">最佳分數 ≤ 此值時提前停止；未填則用程式預設（約 0.61）</div>
           </div>
 
           <div class="col-12 col-md-2 col-lg-2" id="col-submit">
@@ -341,6 +343,17 @@
   const colSubmit = document.getElementById('col-submit');
   const GA_CPSAT_VALUE = 'ga_cpsat';
 
+  function syncStopThresholdHidden() {
+    const hidden = document.getElementById('stop_threshold_hidden');
+    const ui = document.getElementById('stop_threshold_ui');
+    if (!hidden || !ui || !algorithmSelect) return;
+    if (algorithmSelect.value === GA_CPSAT_VALUE) {
+      hidden.value = ui.value.trim();
+    } else {
+      hidden.value = '';
+    }
+  }
+
   function syncAlgorithmRowLayout() {
     if (!algorithmSelect || !colAlgorithm || !colStopThreshold || !colSubmit) return;
     const isGaCpsat = algorithmSelect.value === GA_CPSAT_VALUE;
@@ -352,10 +365,15 @@
       colAlgorithm.className = 'col-12 col-md-3 col-lg-3';
       colSubmit.className = 'col-12 col-md-3 col-lg-3';
     }
+    syncStopThresholdHidden();
   }
   if (algorithmSelect) {
     algorithmSelect.addEventListener('change', syncAlgorithmRowLayout);
     syncAlgorithmRowLayout();
+  }
+  const stopThresholdUi = document.getElementById('stop_threshold_ui');
+  if (stopThresholdUi) {
+    stopThresholdUi.addEventListener('input', syncStopThresholdHidden);
   }
   const progressSec = document.getElementById('progress-section');
   const progressTitle = document.getElementById('progress-card-title');
@@ -526,6 +544,7 @@
 
   form.addEventListener('submit', async function (e) {
     e.preventDefault();
+    syncStopThresholdHidden();
 
     // 重置 UI
     progressSec.style.display = 'block';

@@ -4,6 +4,7 @@ import os
 import queue
 import threading
 import uuid
+from dataclasses import replace
 
 import pandas as pd
 from flask import Flask, Response, redirect, render_template, request, url_for
@@ -320,12 +321,19 @@ def run_job():
         return _sse_error(f"不支援的算法：{algo_key}")
 
     stop_raw = (request.form.get("stop_threshold") or "").strip()
-    ga_target_fitness: float | None = None
-    if algo_key == "ga_cpsat" and stop_raw:
-        try:
-            ga_target_fitness = float(stop_raw)
-        except ValueError:
-            return _sse_error("停止閾值必須為有效數字。")
+    stop_raw = stop_raw.replace("\ufeff", "").replace("\u200b", "").replace("\u200c", "")
+    stop_norm = stop_raw.replace(",", ".").strip()
+
+    if algo_key == "ga_cpsat":
+        cfg = GAConfig()
+        if stop_norm:
+            try:
+                cfg = replace(cfg, target_fitness=float(stop_norm))
+            except ValueError:
+                return _sse_error("停止閾值必須為有效數字。")
+        scheduler_instance = GACpsatScheduler(cfg)
+    else:
+        scheduler_instance = REGISTRY[algo_key]
 
     # 讀取到 BytesIO（執行緒安全）
     shift_bytes = io.BytesIO(shift_file.read())
@@ -352,13 +360,9 @@ def run_job():
             progress_q.put(msg)
 
         try:
-            if algo_key == "ga_cpsat" and ga_target_fitness is not None:
-                scheduler = GACpsatScheduler(
-                    GAConfig(target_fitness=ga_target_fitness)
-                )
-            else:
-                scheduler = REGISTRY[algo_key]
-            grid_df, penalty = scheduler.run(staff_df, demand_df, callback=on_progress)
+            grid_df, penalty = scheduler_instance.run(
+                staff_df, demand_df, callback=on_progress
+            )
 
             # 儲存結果，超過上限時移除最舊的
             _job_results[job_id] = {
