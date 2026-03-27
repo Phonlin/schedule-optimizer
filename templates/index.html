@@ -66,6 +66,11 @@
       padding: 8px 12px; border-radius: 6px;
     }
     #progress-log .log-line { line-height: 1.6; }
+
+    /* 上傳列：與檔案選擇欄標題／輸入框垂直對齊 */
+    .upload-controls-row > [class*="col-"] > .form-label:first-child {
+      min-height: 1.5rem;
+    }
   </style>
 </head>
 <body>
@@ -85,37 +90,49 @@
     <div class="card-body">
       <h2 class="h5 card-title mb-3">上傳資料</h2>
       <form id="schedule-form" enctype="multipart/form-data">
-        <div class="row g-3 align-items-end">
+        <div class="row g-3 align-items-start upload-controls-row">
 
-          <div class="col-md-4">
+          <div class="col-12 col-md-3 col-lg-3">
             <label for="shift_csv" class="form-label fw-semibold">班別需求 CSV</label>
             <input class="form-control" type="file" id="shift_csv" name="shift_csv" accept=".csv" required>
             <div class="form-text">例如：Shift_Demand.csv</div>
           </div>
 
-          <div class="col-md-4">
+          <div class="col-12 col-md-3 col-lg-3">
             <label for="staff_csv" class="form-label fw-semibold">工程師清單 CSV</label>
             <input class="form-control" type="file" id="staff_csv" name="staff_csv" accept=".csv" required>
             <div class="form-text">例如：Engineer_List.csv</div>
           </div>
 
-          <div class="col-md-2">
+          <div class="col-12 col-md-2 col-lg-2" id="col-algorithm">
             <label for="algorithm" class="form-label fw-semibold">排班算法</label>
             <select class="form-select" id="algorithm" name="algorithm">
               {% for algo in algorithms %}
               <option value="{{ algo.key }}">{{ algo.name }}</option>
               {% endfor %}
             </select>
+            <div class="form-text">&nbsp;</div>
           </div>
 
-          <div class="col-md-2 d-grid">
-            <button id="submit-btn" type="submit" class="btn btn-primary">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
-                   class="bi bi-play-fill me-1" viewBox="0 0 16 16">
-                <path d="M11.596 8.697l-6.363 3.692A.5.5 0 0 1 4.5 12V4a.5.5 0 0 1 .733-.441l6.363 3.692a.5.5 0 0 1 0 .882z"/>
-              </svg>
-              開始排班
-            </button>
+          <div class="col-12 col-md-2 col-lg-2 d-none" id="col-stop-threshold">
+            <label for="stop_threshold" class="form-label fw-semibold">停止閾值</label>
+            <input class="form-control" type="text" id="stop_threshold" name="stop_threshold"
+                   inputmode="decimal" placeholder="選填" autocomplete="off">
+            <div class="form-text">懲罰值 ≤ 此值時提前停止，預設 0.6</div>
+          </div>
+
+          <div class="col-12 col-md-2 col-lg-2" id="col-submit">
+            <label class="form-label fw-semibold user-select-none text-transparent" aria-hidden="true">.</label>
+            <div class="d-grid">
+              <button id="submit-btn" type="submit" class="btn btn-primary">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                     class="bi bi-play-fill me-1" viewBox="0 0 16 16">
+                  <path d="M11.596 8.697l-6.363 3.692A.5.5 0 0 1 4.5 12V4a.5.5 0 0 1 .733-.441l6.363 3.692a.5.5 0 0 1 0 .882z"/>
+                </svg>
+                開始排班
+              </button>
+            </div>
+            <div class="form-text">&nbsp;</div>
           </div>
 
         </div>
@@ -318,6 +335,28 @@
   const ALGO_NAME = PAGE_DATA.algorithm_name || '排班演算法';
   const form       = document.getElementById('schedule-form');
   const submitBtn  = document.getElementById('submit-btn');
+  const algorithmSelect = document.getElementById('algorithm');
+  const colAlgorithm = document.getElementById('col-algorithm');
+  const colStopThreshold = document.getElementById('col-stop-threshold');
+  const colSubmit = document.getElementById('col-submit');
+  const GA_CPSAT_VALUE = 'ga_cpsat';
+
+  function syncAlgorithmRowLayout() {
+    if (!algorithmSelect || !colAlgorithm || !colStopThreshold || !colSubmit) return;
+    const isGaCpsat = algorithmSelect.value === GA_CPSAT_VALUE;
+    colStopThreshold.classList.toggle('d-none', !isGaCpsat);
+    if (isGaCpsat) {
+      colAlgorithm.className = 'col-12 col-md-2 col-lg-2';
+      colSubmit.className = 'col-12 col-md-2 col-lg-2';
+    } else {
+      colAlgorithm.className = 'col-12 col-md-3 col-lg-3';
+      colSubmit.className = 'col-12 col-md-3 col-lg-3';
+    }
+  }
+  if (algorithmSelect) {
+    algorithmSelect.addEventListener('change', syncAlgorithmRowLayout);
+    syncAlgorithmRowLayout();
+  }
   const progressSec = document.getElementById('progress-section');
   const progressTitle = document.getElementById('progress-card-title');
   const progressBar = document.getElementById('progress-bar');

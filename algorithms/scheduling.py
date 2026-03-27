@@ -54,7 +54,8 @@ class GAConfig:
 
     # 崔：為甚麼是 0.61 呢呵呵，因為 IEEE 754: 0.2+0.2+0.2 = 0.6000000000000001
     # 嘗試過 0.6 會跑完 15 輪
-    target_fitness: float = 0.61 # 若最佳分數 <= 0.61，立即停止
+    # 若最佳分數 <= target_fitness 即停止；前端「停止閾值」選填時會覆寫此值
+    target_fitness: float = 0.61
     
     #GA 找到「不錯的解」，再用 CP-SAT 做「數學最佳化精修」
     # CP-SAT 微調參數

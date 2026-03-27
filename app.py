@@ -9,6 +9,8 @@ import pandas as pd
 from flask import Flask, Response, redirect, render_template, request, url_for
 
 from algorithms import REGISTRY
+from algorithms.ga_cpsat import GACpsatScheduler
+from algorithms.scheduling import GAConfig
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-me-in-production")
@@ -317,6 +319,14 @@ def run_job():
     if algo_key not in REGISTRY:
         return _sse_error(f"不支援的算法：{algo_key}")
 
+    stop_raw = (request.form.get("stop_threshold") or "").strip()
+    ga_target_fitness: float | None = None
+    if algo_key == "ga_cpsat" and stop_raw:
+        try:
+            ga_target_fitness = float(stop_raw)
+        except ValueError:
+            return _sse_error("停止閾值必須為有效數字。")
+
     # 讀取到 BytesIO（執行緒安全）
     shift_bytes = io.BytesIO(shift_file.read())
     staff_bytes = io.BytesIO(staff_file.read())
@@ -342,7 +352,12 @@ def run_job():
             progress_q.put(msg)
 
         try:
-            scheduler = REGISTRY[algo_key]
+            if algo_key == "ga_cpsat" and ga_target_fitness is not None:
+                scheduler = GACpsatScheduler(
+                    GAConfig(target_fitness=ga_target_fitness)
+                )
+            else:
+                scheduler = REGISTRY[algo_key]
             grid_df, penalty = scheduler.run(staff_df, demand_df, callback=on_progress)
 
             # 儲存結果，超過上限時移除最舊的

@@ -6,3 +6,4 @@ deap
 numpy
 openpyxl
 gurobipy
+ortools
